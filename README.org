@@ -1,0 +1,30 @@
+* Project Description
+
+This repository contains a "Bare metal" RISC-V execution environment implementation. This implementation defines the following execution environment interface (EEI):
+
+- A single unprivileged hart with initial state defined by power-on reset.
+
+- The base integer ISA RV32I with FENCE, ECALL, and EBREAK executed as NOPs.
+
+- A subset of the Zicsr and Zicntr extensions, namely the instructions:
+  - CSRRW
+  - CSRRS
+  - RDCYCLE
+
+- Available CSRs:
+  - MTVEC
+  - MEPC
+  - MCAUSE
+  - CYCLE
+
+- Supported Exceptions:
+  - Instruction address misaligned
+  - Illegal Instruction
+  - Load address misaligned
+  - Store address misaligned
+
+* Datapath Block Diagram
+
+This diagram is the canvas upon which the datapath design evolved. Its minimal nature encodes the essentials of the design while keeping it compact and easy to iterate on. The tradeoff is that it does not serve as a strict implementation specification. Instead, it conveys architectural intent and intuition, leaving lower level details upto the implementation.
+
+[[file:block_diagram.png]]
