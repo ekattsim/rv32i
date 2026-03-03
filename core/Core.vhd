@@ -47,10 +47,24 @@ architecture Core_ARCH of Core is
     constant CONTROL_JAL         : std_logic_vector(1 downto 0) := "10";
     constant CONTROL_JALR        : std_logic_vector(1 downto 0) := "11";
 
-    constant CSR_MTVEC_ADDR  : std_logic_vector(11 downto 0) := x"305";
-    constant CSR_MEPC_ADDR   : std_logic_vector(11 downto 0) := x"341";
-    constant CSR_MCAUSE_ADDR : std_logic_vector(11 downto 0) := x"342";
-    constant CSR_CYCLE_ADDR  : std_logic_vector(11 downto 0) := x"C00";
+    constant ALUSRC1_RS1  : std_logic_vector(1 downto 0) := "00";
+    constant ALUSRC1_PC   : std_logic_vector(1 downto 0) := "01";
+    constant ALUSRC1_ZERO : std_logic_vector(1 downto 0) := "10";
+
+    constant ALUSRC2_RS2  : std_logic_vector(1 downto 0) := "00";
+    constant ALUSRC2_IMM  : std_logic_vector(1 downto 0) := "01";
+    constant ALUSRC2_FOUR : std_logic_vector(1 downto 0) := "10";
+
+    constant ALUOP_ADD  : std_logic_vector(3 downto 0) := "0000";
+    constant ALUOP_SUB  : std_logic_vector(3 downto 0) := "0001";
+    constant ALUOP_SLL  : std_logic_vector(3 downto 0) := "0010";
+    constant ALUOP_SLT  : std_logic_vector(3 downto 0) := "0011";
+    constant ALUOP_SLTU : std_logic_vector(3 downto 0) := "0100";
+    constant ALUOP_XOR  : std_logic_vector(3 downto 0) := "0101";
+    constant ALUOP_SRL  : std_logic_vector(3 downto 0) := "0110";
+    constant ALUOP_SRA  : std_logic_vector(3 downto 0) := "0111";
+    constant ALUOP_OR   : std_logic_vector(3 downto 0) := "1000";
+    constant ALUOP_AND  : std_logic_vector(3 downto 0) := "1001";
 
     -- IF signals===================================================================
     signal seqAddr, nextInst, PC : word;
@@ -226,6 +240,223 @@ begin  -- architecture Core_ARCH
     funct3  <= inst(14 downto 12);
     csrAddr <= inst(31 downto 20);
 
+    -- purpose: Instruction decode and control signal generation for ID stage.
+    -- type   : combinational
+    -- inputs : all
+    -- outputs: illegalInst, format, controlType, csrInst, csrWriteOrSet,
+    --          ALUSrc1, ALUSrc2, ALUOp, memEn_s, writeEn_s, byteEn_s, sign,
+    --          memToReg, regWrite
+    CONTROL : process (all) is
+        variable opcode : std_logic_vector(6 downto 0);
+        variable funct7 : std_logic_vector(6 downto 0);
+    begin
+        opcode := inst(6 downto 0);
+        funct7 := inst(31 downto 25);
+
+        illegalInst   <= '0';
+        format        <= INSTR_FORMAT.r_type;
+        controlType   <= CONTROL_NOT_CONTROL;
+        csrInst       <= '0';
+        csrWriteOrSet <= '0';
+
+        ALUSrc1 <= ALUSRC1_RS1;
+        ALUSrc2 <= ALUSRC2_RS2;
+        ALUOp   <= ALUOP_ADD;
+
+        memEn_s   <= '0';
+        writeEn_s <= '0';
+        byteEn_s  <= "0000";
+        sign      <= '1';
+
+        memToReg <= '0';
+        regWrite <= '0';
+
+        case opcode is
+            when "0110011" =>  					 -- OP
+                format   <= INSTR_FORMAT.r_type;
+                regWrite <= '1';
+                case funct3 is
+                    when "000" =>
+                        if funct7 = "0100000" then
+                            ALUOp <= ALUOP_SUB;  -- SUB
+                        elsif funct7 = "0000000" then
+                            ALUOp <= ALUOP_ADD;  -- ADD
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "001" =>
+                        if funct7 = "0000000" then
+                            ALUOp <= ALUOP_SLL;
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "010" =>
+                        if funct7 = "0000000" then
+                            ALUOp <= ALUOP_SLT;
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "011" =>
+                        if funct7 = "0000000" then
+                            ALUOp <= ALUOP_SLTU;
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "100" =>
+                        if funct7 = "0000000" then
+                            ALUOp <= ALUOP_XOR;
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "101" =>
+                        if funct7 = "0100000" then
+                            ALUOp <= ALUOP_SRA;
+                        elsif funct7 = "0000000" then
+                            ALUOp <= ALUOP_SRL;
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "110" =>
+                        if funct7 = "0000000" then
+                            ALUOp <= ALUOP_OR;
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "111" =>
+                        if funct7 = "0000000" then
+                            ALUOp <= ALUOP_AND;
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when others =>
+                        illegalInst <= '1';
+                end case;
+
+            when "0010011" =>  							-- OP-IMM
+                format   <= INSTR_FORMAT.i_type;
+                ALUSrc2  <= ALUSRC2_IMM;
+                regWrite <= '1';
+                case funct3 is
+                    when "000" => ALUOp <= ALUOP_ADD;  	-- ADDI
+                    when "010" => ALUOp <= ALUOP_SLT;  	-- SLTI
+                    when "011" => ALUOp <= ALUOP_SLTU;  -- SLTIU
+                    when "100" => ALUOp <= ALUOP_XOR;  	-- XORI
+                    when "110" => ALUOp <= ALUOP_OR;  	-- ORI
+                    when "111" => ALUOp <= ALUOP_AND;  	-- ANDI
+                    when "001" =>
+                        if funct7 = "0000000" then
+                            ALUOp <= ALUOP_SLL;  		-- SLLI
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when "101" =>
+                        if funct7 = "0100000" then
+                            ALUOp <= ALUOP_SRA;  		-- SRAI
+                        elsif funct7 = "0000000" then
+                            ALUOp <= ALUOP_SRL;  		-- SRLI
+                        else
+                            illegalInst <= '1';
+                        end if;
+                    when others =>
+                        illegalInst <= '1';
+                end case;
+
+            when "0000011" =>  											-- LOAD
+                format   <= INSTR_FORMAT.i_type;
+                ALUSrc2  <= ALUSRC2_IMM;
+                ALUOp    <= ALUOP_ADD;
+                memEn_s  <= '1';
+                memToReg <= '1';
+                regWrite <= '1';
+                case funct3 is
+                    when "000"  => byteEn_s    <= "0001"; sign <= '1';  -- LB
+                    when "001"  => byteEn_s    <= "0011"; sign <= '1';  -- LH
+                    when "010"  => byteEn_s    <= "1111"; sign <= '1';  -- LW
+                    when "100"  => byteEn_s    <= "0001"; sign <= '0';  -- LBU
+                    when "101"  => byteEn_s    <= "0011"; sign <= '0';  -- LHU
+                    when others => illegalInst <= '1';
+                end case;
+
+            when "0100011" =>  							   -- STORE
+                format    <= INSTR_FORMAT.s_type;
+                ALUSrc2   <= ALUSRC2_IMM;
+                ALUOp     <= ALUOP_ADD;
+                memEn_s   <= '1';
+                writeEn_s <= '1';
+                case funct3 is
+                    when "000"  => byteEn_s    <= "0001";  -- SB
+                    when "001"  => byteEn_s    <= "0011";  -- SH
+                    when "010"  => byteEn_s    <= "1111";  -- SW
+                    when others => illegalInst <= '1';
+                end case;
+
+            when "1100011" =>  			-- BRANCH
+                format      <= INSTR_FORMAT.b_type;
+                controlType <= CONTROL_BRANCH;
+                case funct3 is
+                    when "000" | "001" | "100" | "101" | "110" | "111" =>
+                        null;
+                    when others =>
+                        illegalInst <= '1';
+                end case;
+
+            when "1101111" =>  			-- JAL
+                format      <= INSTR_FORMAT.j_type;
+                controlType <= CONTROL_JAL;
+                ALUSrc1     <= ALUSRC1_PC;
+                ALUSrc2     <= ALUSRC2_FOUR;
+                ALUOp       <= ALUOP_ADD;
+                regWrite    <= '1';
+
+            when "1100111" =>  			-- JALR
+                format      <= INSTR_FORMAT.i_type;
+                controlType <= CONTROL_JALR;
+                ALUSrc1     <= ALUSRC1_PC;
+                ALUSrc2     <= ALUSRC2_FOUR;
+                ALUOp       <= ALUOP_ADD;
+                regWrite    <= '1';
+                if funct3 /= "000" then
+                    illegalInst <= '1';
+                end if;
+
+            when "0110111" =>  			-- LUI
+                format   <= INSTR_FORMAT.u_type;
+                ALUSrc1  <= ALUSRC1_ZERO;
+                ALUSrc2  <= ALUSRC2_IMM;
+                ALUOp    <= ALUOP_ADD;
+                regWrite <= '1';
+
+            when "0010111" =>  			-- AUIPC
+                format   <= INSTR_FORMAT.u_type;
+                ALUSrc1  <= ALUSRC1_PC;
+                ALUSrc2  <= ALUSRC2_IMM;
+                ALUOp    <= ALUOP_ADD;
+                regWrite <= '1';
+
+            when "1110011" =>  -- SYSTEM (subset: CSRRW/CSRRS + ECALL/EBREAK as NOP)
+                format <= INSTR_FORMAT.i_type;
+                if funct3 = "001" then  -- CSRRW
+                    csrInst       <= '1';
+                    csrWriteOrSet <= '0';
+                    regWrite      <= '1';
+                elsif funct3 = "010" then  -- CSRRS (RDCYCLE form included)
+                    csrInst       <= '1';
+                    csrWriteOrSet <= '1';
+                    regWrite      <= '1';
+                elsif funct3 = "000" then  -- ECALL / EBREAK
+                    null;
+                else
+                    illegalInst <= '1';
+                end if;
+
+            when "0001111" =>  			-- FENCE / FENCE.I treated as NOP
+                format <= INSTR_FORMAT.i_type;
+
+            when others =>
+                illegalInst <= '1';
+        end case;
+    end process CONTROL;
+
     -- purpose: Asynchronous read with Synchronous write on falling edge.
     -- type   : sequential
     -- inputs : clock, reset, rs1, rs2, rd, regWrite, regWriteData
@@ -323,6 +554,11 @@ begin  -- architecture Core_ARCH
     -- inputs : clock, reset, csrAddr, csrWriteData, csrInst, exception, MEPC, MCAUSE
     -- outputs: csrData, MTVEC
     CSR_FILE : process (clock, reset, csrAddr, csrInst, csrWriteData, exception, MEPC, MCAUSE) is
+        constant CSR_MTVEC_ADDR  : std_logic_vector(11 downto 0) := x"305";
+        constant CSR_MEPC_ADDR   : std_logic_vector(11 downto 0) := x"341";
+        constant CSR_MCAUSE_ADDR : std_logic_vector(11 downto 0) := x"342";
+        constant CSR_CYCLE_ADDR  : std_logic_vector(11 downto 0) := x"C00";
+
         variable csr_mtvec  : word := (others => '0');
         variable csr_mepc   : word := (others => '0');
         variable csr_mcause : word := (others => '0');
