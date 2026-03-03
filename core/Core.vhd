@@ -465,15 +465,15 @@ begin  -- architecture Core_ARCH
 
     -- purpose: Asynchronous read with Synchronous write on falling edge.
     -- type   : sequential
-    -- inputs : clock, reset, rs1, rs2, rd, regWrite, regWriteData
+    -- inputs : clock, reset, rs1, rs2, rd, MEM_WB_regWrite, regWriteData
     -- outputs: rs1Read, rs2Read
-    REGISTER_FILE : process (clock, reset, rs1, rs2, rd, regWrite, regWriteData) is
+    REGISTER_FILE : process (clock, reset, rs1, rs2, rd, MEM_WB_regWrite, regWriteData) is
         variable regFile : reg_file_t := (others => (others => '0'));
     begin  -- process REGISTER_FILE
         if reset = '1' then
             regFile := (others => (others => '0'));
         elsif clock'event and clock = '0' then  -- falling clock edge
-            if (regWrite = '1') and (rd /= "00000") then
+            if (MEM_WB_regWrite = '1') and (rd /= "00000") then
                 regFile(to_integer(unsigned(rd))) := regWriteData;
             end if;
         end if;
@@ -858,7 +858,7 @@ begin  -- architecture Core_ARCH
     -- type   : combinational
     -- inputs : all
     -- outputs: EX_forwardA, EX_forwardB
-    FORWARDING_UNIT : process (all) is
+    EX_FORWARDING_UNIT : process (all) is
     begin
         EX_forwardA <= "00";
         EX_forwardB <= "00";
@@ -1017,5 +1017,72 @@ begin  -- architecture Core_ARCH
             end if;
         end if;
     end process EX_MEM;
+
+    -- MEM stage===================================================================
+
+    -- Data memory interface.
+    memEn     <= EX_MEM_memEn_s;
+    writeEn   <= EX_MEM_writeEn_s;
+    byteEn    <= EX_MEM_byteEn_s;
+    dataAddr  <= EX_MEM_ALUResult;
+    dataWrite <= EX_MEM_ALUArg2;
+
+    -- purpose: Extend load data according to width/sign controls.
+    -- type   : combinational
+    -- inputs : all
+    -- outputs: extDataRead
+    EXTENSION : process (all) is
+    begin
+        extDataRead <= (others => '0');
+
+        if EX_MEM_byteEn_s = "0001" then
+            if EX_MEM_sign = '1' then
+                extDataRead <= (31 downto 8 => dataRead(7)) & dataRead(7 downto 0);
+            else
+                extDataRead <= (31 downto 8 => '0') & dataRead(7 downto 0);
+            end if;
+        elsif EX_MEM_byteEn_s = "0011" then
+            if EX_MEM_sign = '1' then
+                extDataRead <= (31 downto 16 => dataRead(15)) & dataRead(15 downto 0);
+            else
+                extDataRead <= (31 downto 16 => '0') & dataRead(15 downto 0);
+            end if;
+        elsif EX_MEM_byteEn_s = "1111" then
+            extDataRead <= dataRead;
+        end if;
+    end process EXTENSION;
+
+    -- purpose: MEM/WB pipeline register.
+    -- type   : sequential
+    -- inputs : clock, reset, MEM outputs
+    -- outputs: MEM_WB_*
+    MEM_WB : process (clock, reset) is
+    begin
+        if reset = '1' then
+            MEM_WB_ALUResult   <= (others => '0');
+            MEM_WB_extDataRead <= (others => '0');
+            MEM_WB_rd          <= (others => '0');
+            MEM_WB_memToReg    <= '0';
+            MEM_WB_regWrite    <= '0';
+        elsif clock'event and clock = '1' then
+            MEM_WB_ALUResult   <= EX_MEM_ALUResult;
+            MEM_WB_extDataRead <= extDataRead;
+            MEM_WB_rd          <= EX_MEM_rd;
+            MEM_WB_memToReg    <= EX_MEM_memToReg;
+            MEM_WB_regWrite    <= EX_MEM_regWrite;
+        end if;
+    end process MEM_WB;
+
+    -- WB stage====================================================================
+
+    -- Select writeback source for register file.
+    WB_MUX : process (all) is
+    begin
+        if MEM_WB_memToReg = '1' then
+            regWriteData <= MEM_WB_extDataRead;
+        else
+            regWriteData <= MEM_WB_ALUResult;
+        end if;
+    end process WB_MUX;
 
 end architecture Core_ARCH;
