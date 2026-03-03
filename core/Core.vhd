@@ -740,6 +740,75 @@ begin  -- architecture Core_ARCH
         end if;
     end process HAZARD_UNIT;
 
+    -- Bubble EX on decode stall or any exception flush condition.
+    bubble <= stall or exception;
+
+    -- purpose: ID/EX pipeline register. Captures ID outputs for EX stage, or
+    -- injects a NOP bubble on hazard/flush events.
+    -- type   : sequential
+    -- inputs : clock, reset, IF_ID_PC, rs1_d, rs2_d, immediate, rd, controls, bubble
+    -- outputs: ID_EX_*
+    ID_EX : process (clock, reset) is
+    begin
+        if reset = '1' then
+            ID_EX_PC        <= (others => '0');
+            ID_EX_rs1_d     <= (others => '0');
+            ID_EX_rs2_d     <= (others => '0');
+            ID_EX_immediate <= (others => '0');
+            ID_EX_rd        <= (others => '0');
+
+            ID_EX_ALUSrc1 <= (others => '0');
+            ID_EX_ALUSrc2 <= (others => '0');
+            ID_EX_ALUOp   <= (others => '0');
+
+            ID_EX_memEn_s   <= '0';
+            ID_EX_writeEn_s <= '0';
+            ID_EX_byteEn_s  <= (others => '0');
+            ID_EX_sign      <= '0';
+
+            ID_EX_memToReg <= '0';
+            ID_EX_regWrite <= '0';
+        elsif clock'event and clock = '1' then
+            if bubble = '1' then
+                ID_EX_PC        <= (others => '0');
+                ID_EX_rs1_d     <= (others => '0');
+                ID_EX_rs2_d     <= (others => '0');
+                ID_EX_immediate <= (others => '0');
+                ID_EX_rd        <= (others => '0');
+
+                ID_EX_ALUSrc1 <= (others => '0');
+                ID_EX_ALUSrc2 <= (others => '0');
+                ID_EX_ALUOp   <= (others => '0');
+
+                ID_EX_memEn_s   <= '0';
+                ID_EX_writeEn_s <= '0';
+                ID_EX_byteEn_s  <= (others => '0');
+                ID_EX_sign      <= '0';
+
+                ID_EX_memToReg <= '0';
+                ID_EX_regWrite <= '0';
+            else
+                ID_EX_PC        <= IF_ID_PC;
+                ID_EX_rs1_d     <= rs1_d;
+                ID_EX_rs2_d     <= rs2_d;
+                ID_EX_immediate <= immediate;
+                ID_EX_rd        <= rd;
+
+                ID_EX_ALUSrc1 <= ALUSrc1;
+                ID_EX_ALUSrc2 <= ALUSrc2;
+                ID_EX_ALUOp   <= ALUOp;
+
+                ID_EX_memEn_s   <= memEn_s;
+                ID_EX_writeEn_s <= writeEn_s;
+                ID_EX_byteEn_s  <= byteEn_s;
+                ID_EX_sign      <= sign;
+
+                ID_EX_memToReg <= memToReg;
+                ID_EX_regWrite <= regWrite;
+            end if;
+        end if;
+    end process ID_EX;
+
 	-- purpose: Detect architecturally visible exceptions.
     -- type   : combinational
     -- inputs : all
