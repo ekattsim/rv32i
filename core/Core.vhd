@@ -123,6 +123,7 @@ architecture Core_ARCH of Core is
     -- ID/EX pipeline registers=====================================================
     signal ID_EX_PC, ID_EX_immediate : word;
     signal ID_EX_rs1_d, ID_EX_rs2_d  : word;
+    signal ID_EX_rs1, ID_EX_rs2      : std_logic_vector(4 downto 0);
     signal ID_EX_rd                  : std_logic_vector(4 downto 0);
 
     -- Control EX
@@ -754,6 +755,8 @@ begin  -- architecture Core_ARCH
             ID_EX_PC        <= (others => '0');
             ID_EX_rs1_d     <= (others => '0');
             ID_EX_rs2_d     <= (others => '0');
+            ID_EX_rs1       <= (others => '0');
+            ID_EX_rs2       <= (others => '0');
             ID_EX_immediate <= (others => '0');
             ID_EX_rd        <= (others => '0');
 
@@ -773,6 +776,8 @@ begin  -- architecture Core_ARCH
                 ID_EX_PC        <= (others => '0');
                 ID_EX_rs1_d     <= (others => '0');
                 ID_EX_rs2_d     <= (others => '0');
+                ID_EX_rs1       <= (others => '0');
+                ID_EX_rs2       <= (others => '0');
                 ID_EX_immediate <= (others => '0');
                 ID_EX_rd        <= (others => '0');
 
@@ -791,6 +796,8 @@ begin  -- architecture Core_ARCH
                 ID_EX_PC        <= IF_ID_PC;
                 ID_EX_rs1_d     <= rs1_d;
                 ID_EX_rs2_d     <= rs2_d;
+                ID_EX_rs1       <= rs1;
+                ID_EX_rs2       <= rs2;
                 ID_EX_immediate <= immediate;
                 ID_EX_rd        <= rd;
 
@@ -809,7 +816,7 @@ begin  -- architecture Core_ARCH
         end if;
     end process ID_EX;
 
-	-- purpose: Detect architecturally visible exceptions.
+    -- purpose: Detect architecturally visible exceptions.
     -- type   : combinational
     -- inputs : all
     -- outputs: MEPC, MCAUSE, exception, flushEX
@@ -844,5 +851,171 @@ begin  -- architecture Core_ARCH
             flushEX   <= '1';
         end if;
     end process EXCEPTION_DETECTION;
+
+    -- EX stage====================================================================
+
+    -- purpose: Select forwarding source for EX operands.
+    -- type   : combinational
+    -- inputs : all
+    -- outputs: EX_forwardA, EX_forwardB
+    FORWARDING_UNIT : process (all) is
+    begin
+        EX_forwardA <= "00";
+        EX_forwardB <= "00";
+
+        if (EX_MEM_regWrite = '1') and (EX_MEM_rd /= "00000") and (EX_MEM_rd = ID_EX_rs1) then
+            EX_forwardA <= "10";
+        elsif (MEM_WB_regWrite = '1') and (MEM_WB_rd /= "00000") and (MEM_WB_rd = ID_EX_rs1) then
+            EX_forwardA <= "01";
+        end if;
+
+        if (EX_MEM_regWrite = '1') and (EX_MEM_rd /= "00000") and (EX_MEM_rd = ID_EX_rs2) then
+            EX_forwardB <= "10";
+        elsif (MEM_WB_regWrite = '1') and (MEM_WB_rd /= "00000") and (MEM_WB_rd = ID_EX_rs2) then
+            EX_forwardB <= "01";
+        end if;
+    end process FORWARDING_UNIT;
+
+    -- purpose: Build ALU source operands from ID/EX controls with forwarding.
+    -- type   : combinational
+    -- inputs : all
+    -- outputs: ALUArg1, ALUArg2
+    ALU_SOURCE : process (all) is
+        variable srcA, srcB : word;
+    begin
+        srcA := ID_EX_rs1_d;
+        srcB := ID_EX_rs2_d;
+
+        case ID_EX_ALUSrc1 is
+            when ALUSRC1_PC =>
+                srcA := ID_EX_PC;
+            when ALUSRC1_ZERO =>
+                srcA := (others => '0');
+            when others =>
+                srcA := ID_EX_rs1_d;
+        end case;
+
+        case ID_EX_ALUSrc2 is
+            when ALUSRC2_IMM =>
+                srcB := ID_EX_immediate;
+            when ALUSRC2_FOUR =>
+                srcB := std_logic_vector(to_unsigned(4, XLEN));
+            when others =>
+                srcB := ID_EX_rs2_d;
+        end case;
+
+        if ID_EX_ALUSrc1 = ALUSRC1_RS1 then
+            case EX_forwardA is
+                when "10" =>
+                    srcA := EX_MEM_ALUResult;
+                when "01" =>
+                    srcA := regWriteData;
+                when others =>
+                    null;
+            end case;
+        end if;
+
+        if ID_EX_ALUSrc2 = ALUSRC2_RS2 then
+            case EX_forwardB is
+                when "10" =>
+                    srcB := EX_MEM_ALUResult;
+                when "01" =>
+                    srcB := regWriteData;
+                when others =>
+                    null;
+            end case;
+        end if;
+
+        ALUArg1 <= srcA;
+        ALUArg2 <= srcB;
+    end process ALU_SOURCE;
+
+    -- purpose: Execute ALU operation selected by ID/EX ALUOp.
+    -- type   : combinational
+    -- inputs : all
+    -- outputs: ALUResult
+    ALU : process (all) is
+        variable result : word;
+    begin
+        result := (others => '0');
+
+        case ID_EX_ALUOp is
+            when ALUOP_ADD =>
+                result := std_logic_vector(signed(ALUArg1) + signed(ALUArg2));
+            when ALUOP_SUB =>
+                result := std_logic_vector(signed(ALUArg1) - signed(ALUArg2));
+            when ALUOP_SLL =>
+                result := std_logic_vector(shift_left(unsigned(ALUArg1), to_integer(unsigned(ALUArg2(4 downto 0)))));
+            when ALUOP_SLT =>
+                if signed(ALUArg1) < signed(ALUArg2) then
+                    result(0) := '1';
+                end if;
+            when ALUOP_SLTU =>
+                if unsigned(ALUArg1) < unsigned(ALUArg2) then
+                    result(0) := '1';
+                end if;
+            when ALUOP_XOR =>
+                result := ALUArg1 xor ALUArg2;
+            when ALUOP_SRL =>
+                result := std_logic_vector(shift_right(unsigned(ALUArg1), to_integer(unsigned(ALUArg2(4 downto 0)))));
+            when ALUOP_SRA =>
+                result := std_logic_vector(shift_right(signed(ALUArg1), to_integer(unsigned(ALUArg2(4 downto 0)))));
+            when ALUOP_OR =>
+                result := ALUArg1 or ALUArg2;
+            when ALUOP_AND =>
+                result := ALUArg1 and ALUArg2;
+            when others =>
+                result := (others => '0');
+        end case;
+
+        ALUResult <= result;
+    end process ALU;
+
+    -- purpose: EX/MEM pipeline register.
+    -- type   : sequential
+    -- inputs : clock, reset, flushEX, EX outputs
+    -- outputs: EX_MEM_*
+    EX_MEM : process (clock, reset) is
+    begin
+        if reset = '1' then
+            EX_MEM_ALUArg2   <= (others => '0');
+            EX_MEM_ALUResult <= (others => '0');
+            EX_MEM_rd        <= (others => '0');
+
+            EX_MEM_memEn_s   <= '0';
+            EX_MEM_writeEn_s <= '0';
+            EX_MEM_byteEn_s  <= (others => '0');
+            EX_MEM_sign      <= '0';
+
+            EX_MEM_memToReg <= '0';
+            EX_MEM_regWrite <= '0';
+        elsif clock'event and clock = '1' then
+            if flushEX = '1' then
+                EX_MEM_ALUArg2   <= (others => '0');
+                EX_MEM_ALUResult <= (others => '0');
+                EX_MEM_rd        <= (others => '0');
+
+                EX_MEM_memEn_s   <= '0';
+                EX_MEM_writeEn_s <= '0';
+                EX_MEM_byteEn_s  <= (others => '0');
+                EX_MEM_sign      <= '0';
+
+                EX_MEM_memToReg <= '0';
+                EX_MEM_regWrite <= '0';
+            else
+                EX_MEM_ALUArg2   <= ALUArg2;
+                EX_MEM_ALUResult <= ALUResult;
+                EX_MEM_rd        <= ID_EX_rd;
+
+                EX_MEM_memEn_s   <= ID_EX_memEn_s;
+                EX_MEM_writeEn_s <= ID_EX_writeEn_s;
+                EX_MEM_byteEn_s  <= ID_EX_byteEn_s;
+                EX_MEM_sign      <= ID_EX_sign;
+
+                EX_MEM_memToReg <= ID_EX_memToReg;
+                EX_MEM_regWrite <= ID_EX_regWrite;
+            end if;
+        end if;
+    end process EX_MEM;
 
 end architecture Core_ARCH;
