@@ -66,6 +66,11 @@ architecture Core_ARCH of Core is
     constant ALUOP_OR   : std_logic_vector(3 downto 0) := "1000";
     constant ALUOP_AND  : std_logic_vector(3 downto 0) := "1001";
 
+    constant EXC_INST_ADDR_MISALIGNED  : word := x"00000000";
+    constant EXC_ILLEGAL_INST          : word := x"00000002";
+    constant EXC_LOAD_ADDR_MISALIGNED  : word := x"00000004";
+    constant EXC_STORE_ADDR_MISALIGNED : word := x"00000006";
+
     -- IF signals===================================================================
     signal seqAddr, nextInst, PC : word;
 
@@ -132,8 +137,8 @@ architecture Core_ARCH of Core is
     signal ID_EX_memToReg, ID_EX_regWrite : std_logic;
 
     -- Exception Detection=========================================================
-    signal MEPC, MCAUSE                : word;
-    signal exception, flushID, flushEX : std_logic;
+    signal MEPC, MCAUSE       : word;
+    signal exception, flushEX : std_logic;
 
     -- EX signals===================================================================
     -- EX Forwarding Unit
@@ -734,5 +739,41 @@ begin  -- architecture Core_ARCH
             stall <= '0';
         end if;
     end process HAZARD_UNIT;
+
+	-- purpose: Detect architecturally visible exceptions.
+    -- type   : combinational
+    -- inputs : all
+    -- outputs: MEPC, MCAUSE, exception, flushEX
+    EXCEPTION_DETECTION : process (all) is
+    begin
+        MEPC      <= (others => '0');
+        MCAUSE    <= (others => '0');
+        exception <= '0';
+        flushEX   <= '0';
+
+        if illegalInst = '1' then
+            MEPC      <= IF_ID_PC;  	-- PC_ID
+            MCAUSE    <= EXC_ILLEGAL_INST;
+            exception <= '1';
+        elsif (taken = '1') and (takenAddr(1 downto 0) /= "00") then
+            MEPC      <= IF_ID_PC;  	-- PC_ID
+            MCAUSE    <= EXC_INST_ADDR_MISALIGNED;
+            exception <= '1';
+        elsif (ID_EX_memEn_s = '1') and (ID_EX_writeEn_s = '0') and
+              (((ID_EX_byteEn_s = "0011") and (ALUResult(0) = '1')) or
+               ((ID_EX_byteEn_s = "1111") and (ALUResult(1 downto 0) /= "00"))) then
+            MEPC      <= ID_EX_PC;  	-- PC_EX
+            MCAUSE    <= EXC_LOAD_ADDR_MISALIGNED;
+            exception <= '1';
+            flushEX   <= '1';
+        elsif (ID_EX_memEn_s = '1') and (ID_EX_writeEn_s = '1') and
+              (((ID_EX_byteEn_s = "0011") and (ALUResult(0) = '1')) or
+               ((ID_EX_byteEn_s = "1111") and (ALUResult(1 downto 0) /= "00"))) then
+            MEPC      <= ID_EX_PC;  	-- PC_EX
+            MCAUSE    <= EXC_STORE_ADDR_MISALIGNED;
+            exception <= '1';
+            flushEX   <= '1';
+        end if;
+    end process EXCEPTION_DETECTION;
 
 end architecture Core_ARCH;
