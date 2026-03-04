@@ -129,6 +129,7 @@ architecture Core_ARCH of Core is
     -- Control EX
     signal ID_EX_ALUSrc1, ID_EX_ALUSrc2 : std_logic_vector(1 downto 0);
     signal ID_EX_ALUOp                  : std_logic_vector(3 downto 0);
+    signal ID_EX_csrInst                : std_logic;
 
     -- Control MEM
     signal ID_EX_memEn_s, ID_EX_writeEn_s, ID_EX_sign : std_logic;
@@ -445,10 +446,16 @@ begin  -- architecture Core_ARCH
                 if funct3 = "001" then  -- CSRRW
                     csrInst       <= '1';
                     csrWriteOrSet <= '0';
+                    ALUSrc1       <= ALUSRC1_ZERO;
+                    ALUSrc2       <= ALUSRC2_RS2;
+                    ALUOp         <= ALUOP_ADD;
                     regWrite      <= '1';
                 elsif funct3 = "010" then  -- CSRRS (RDCYCLE form included)
                     csrInst       <= '1';
                     csrWriteOrSet <= '1';
+                    ALUSrc1       <= ALUSRC1_ZERO;
+                    ALUSrc2       <= ALUSRC2_RS2;
+                    ALUOp         <= ALUOP_ADD;
                     regWrite      <= '1';
                 elsif funct3 = "000" then  -- ECALL / EBREAK
                     null;
@@ -772,6 +779,7 @@ begin  -- architecture Core_ARCH
 
             ID_EX_memToReg <= '0';
             ID_EX_regWrite <= '0';
+            ID_EX_csrInst  <= '0';
         elsif clock'event and clock = '1' then
             if bubble = '1' then
                 ID_EX_PC        <= (others => '0');
@@ -793,6 +801,7 @@ begin  -- architecture Core_ARCH
 
                 ID_EX_memToReg <= '0';
                 ID_EX_regWrite <= '0';
+                ID_EX_csrInst  <= '0';
             else
                 ID_EX_PC        <= IF_ID_PC;
                 ID_EX_rs1_d     <= rs1_d;
@@ -813,6 +822,7 @@ begin  -- architecture Core_ARCH
 
                 ID_EX_memToReg <= memToReg;
                 ID_EX_regWrite <= regWrite;
+                ID_EX_csrInst  <= csrInst;
             end if;
         end if;
     end process ID_EX;
@@ -926,7 +936,8 @@ begin  -- architecture Core_ARCH
                 null;
         end case;
 
-        if ID_EX_ALUSrc2 = ALUSRC2_RS2 then
+        -- CSR ops intentionally pass rs2_d (csrData) through ALU unchanged.
+        if (ID_EX_ALUSrc2 = ALUSRC2_RS2) and (ID_EX_csrInst = '0') then
             srcB := rs2_fwd;
         end if;
 
