@@ -3,6 +3,9 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity Core is
+    generic (
+        RESET_PC        : std_logic_vector(31 downto 0) := (others => '0');
+        CSR_MTVEC_RESET : std_logic_vector(31 downto 0) := (others => '0'));
     port (
         reset : in std_logic;
         clock : in std_logic;
@@ -201,7 +204,7 @@ begin  -- architecture Core_ARCH
     PC_32 : process (clock, reset) is
     begin  -- process PC
         if reset = '1' then
-            PC <= (others => '0');
+            PC <= RESET_PC;
         elsif clock'event and clock = '1' then  -- rising clock edge
             if stall = '1' then
                 PC <= PC;
@@ -579,7 +582,7 @@ begin  -- architecture Core_ARCH
         variable csr_cycle  : word := (others => '0');
     begin
         if reset = '1' then
-            csr_mtvec  := (others => '0');
+            csr_mtvec  := CSR_MTVEC_RESET;
             csr_mepc   := (others => '0');
             csr_mcause := (others => '0');
             csr_cycle  := (others => '0');
