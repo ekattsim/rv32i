@@ -147,9 +147,10 @@ architecture Core_ARCH of Core is
 
     -- ALU Operation
     signal ALUArg1, ALUArg2, ALUResult : word;
+    signal EX_rs2_fwd                  : word;
 
     -- EX/MEM pipeline registers====================================================
-    signal EX_MEM_ALUArg2, EX_MEM_ALUResult : word;
+    signal EX_MEM_rs2_fwd, EX_MEM_ALUResult : word;
     signal EX_MEM_rd                        : std_logic_vector(4 downto 0);
 
     -- Control MEM
@@ -239,12 +240,12 @@ begin  -- architecture Core_ARCH
 
     -- ID stage=====================================================================
 
-    -- decode instruction
-    rd      <= inst(11 downto 7);
-    rs1     <= inst(19 downto 15);
-    rs2     <= inst(24 downto 20);
-    funct3  <= inst(14 downto 12);
-    csrAddr <= inst(31 downto 20);
+    -- decode instruction (from IF/ID pipeline register)
+    rd      <= IF_ID_inst(11 downto 7);
+    rs1     <= IF_ID_inst(19 downto 15);
+    rs2     <= IF_ID_inst(24 downto 20);
+    funct3  <= IF_ID_inst(14 downto 12);
+    csrAddr <= IF_ID_inst(31 downto 20);
 
     -- purpose: Instruction decode and control signal generation for ID stage.
     -- type   : combinational
@@ -256,8 +257,8 @@ begin  -- architecture Core_ARCH
         variable opcode : std_logic_vector(6 downto 0);
         variable funct7 : std_logic_vector(6 downto 0);
     begin
-        opcode := inst(6 downto 0);
-        funct7 := inst(31 downto 25);
+        opcode := IF_ID_inst(6 downto 0);
+        funct7 := IF_ID_inst(31 downto 25);
 
         illegalInst   <= '0';
         format        <= INSTR_FORMAT.r_type;
@@ -473,8 +474,8 @@ begin  -- architecture Core_ARCH
         if reset = '1' then
             regFile := (others => (others => '0'));
         elsif clock'event and clock = '0' then  -- falling clock edge
-            if (MEM_WB_regWrite = '1') and (rd /= "00000") then
-                regFile(to_integer(unsigned(rd))) := regWriteData;
+            if (MEM_WB_regWrite = '1') and (MEM_WB_rd /= "00000") then
+                regFile(to_integer(unsigned(MEM_WB_rd))) := regWriteData;
             end if;
         end if;
 
@@ -500,17 +501,17 @@ begin  -- architecture Core_ARCH
         if format = INSTR_FORMAT.r_type then
             immediate <= (others => '0');
         elsif format = INSTR_FORMAT.i_type then
-            immediate <= (31 downto 12 => inst(31)) & inst(31 downto 20);
+            immediate <= (31 downto 12 => IF_ID_inst(31)) & IF_ID_inst(31 downto 20);
         elsif format = INSTR_FORMAT.s_type then
-            immediate <= (31 downto 12 => inst(31)) & inst(31 downto 25) & inst(11 downto 7);
+            immediate <= (31 downto 12 => IF_ID_inst(31)) & IF_ID_inst(31 downto 25) & IF_ID_inst(11 downto 7);
         elsif format = INSTR_FORMAT.b_type then
-            immediate <= (31 downto 13 => inst(31)) & inst(31) & inst(7) &
-                         inst(30 downto 25) & inst(11 downto 8) & '0';
+            immediate <= (31 downto 13 => IF_ID_inst(31)) & IF_ID_inst(31) & IF_ID_inst(7) &
+                         IF_ID_inst(30 downto 25) & IF_ID_inst(11 downto 8) & '0';
         elsif format = INSTR_FORMAT.u_type then
-            immediate <= inst(31 downto 12) & x"000";
+            immediate <= IF_ID_inst(31 downto 12) & x"000";
         elsif format = INSTR_FORMAT.j_type then
-            immediate <= (31 downto 21 => inst(31)) & inst(31) & inst(19 downto 12) &
-                         inst(20) & inst(30 downto 21) & '0';
+            immediate <= (31 downto 21 => IF_ID_inst(31)) & IF_ID_inst(31) & IF_ID_inst(19 downto 12) &
+                         IF_ID_inst(20) & IF_ID_inst(30 downto 21) & '0';
         else
             immediate <= (others => '0');
         end if;
@@ -874,17 +875,18 @@ begin  -- architecture Core_ARCH
         elsif (MEM_WB_regWrite = '1') and (MEM_WB_rd /= "00000") and (MEM_WB_rd = ID_EX_rs2) then
             EX_forwardB <= "01";
         end if;
-    end process FORWARDING_UNIT;
+    end process EX_FORWARDING_UNIT;
 
     -- purpose: Build ALU source operands from ID/EX controls with forwarding.
     -- type   : combinational
     -- inputs : all
-    -- outputs: ALUArg1, ALUArg2
+    -- outputs: ALUArg1, ALUArg2, EX_rs2_fwd
     ALU_SOURCE : process (all) is
-        variable srcA, srcB : word;
+        variable srcA, srcB, rs2_fwd : word;
     begin
-        srcA := ID_EX_rs1_d;
-        srcB := ID_EX_rs2_d;
+        srcA    := ID_EX_rs1_d;
+        srcB    := ID_EX_rs2_d;
+        rs2_fwd := ID_EX_rs2_d;
 
         case ID_EX_ALUSrc1 is
             when ALUSRC1_PC =>
@@ -915,19 +917,22 @@ begin  -- architecture Core_ARCH
             end case;
         end if;
 
+        case EX_forwardB is
+            when "10" =>
+                rs2_fwd := EX_MEM_ALUResult;
+            when "01" =>
+                rs2_fwd := regWriteData;
+            when others =>
+                null;
+        end case;
+
         if ID_EX_ALUSrc2 = ALUSRC2_RS2 then
-            case EX_forwardB is
-                when "10" =>
-                    srcB := EX_MEM_ALUResult;
-                when "01" =>
-                    srcB := regWriteData;
-                when others =>
-                    null;
-            end case;
+            srcB := rs2_fwd;
         end if;
 
-        ALUArg1 <= srcA;
-        ALUArg2 <= srcB;
+        ALUArg1    <= srcA;
+        ALUArg2    <= srcB;
+        EX_rs2_fwd <= rs2_fwd;
     end process ALU_SOURCE;
 
     -- purpose: Execute ALU operation selected by ID/EX ALUOp.
@@ -978,7 +983,7 @@ begin  -- architecture Core_ARCH
     EX_MEM : process (clock, reset) is
     begin
         if reset = '1' then
-            EX_MEM_ALUArg2   <= (others => '0');
+            EX_MEM_rs2_fwd   <= (others => '0');
             EX_MEM_ALUResult <= (others => '0');
             EX_MEM_rd        <= (others => '0');
 
@@ -991,7 +996,7 @@ begin  -- architecture Core_ARCH
             EX_MEM_regWrite <= '0';
         elsif clock'event and clock = '1' then
             if flushEX = '1' then
-                EX_MEM_ALUArg2   <= (others => '0');
+                EX_MEM_rs2_fwd   <= (others => '0');
                 EX_MEM_ALUResult <= (others => '0');
                 EX_MEM_rd        <= (others => '0');
 
@@ -1003,7 +1008,7 @@ begin  -- architecture Core_ARCH
                 EX_MEM_memToReg <= '0';
                 EX_MEM_regWrite <= '0';
             else
-                EX_MEM_ALUArg2   <= ALUArg2;
+                EX_MEM_rs2_fwd   <= EX_rs2_fwd;
                 EX_MEM_ALUResult <= ALUResult;
                 EX_MEM_rd        <= ID_EX_rd;
 
@@ -1025,7 +1030,7 @@ begin  -- architecture Core_ARCH
     writeEn   <= EX_MEM_writeEn_s;
     byteEn    <= EX_MEM_byteEn_s;
     dataAddr  <= EX_MEM_ALUResult;
-    dataWrite <= EX_MEM_ALUArg2;
+    dataWrite <= EX_MEM_rs2_fwd;
 
     -- purpose: Extend load data according to width/sign controls.
     -- type   : combinational
