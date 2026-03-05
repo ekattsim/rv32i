@@ -1,0 +1,10 @@
+[project]
+name = "rv32i"
+version = "0.1.0"
+description = "Bare metal RISC-V execution environment implementation in VHDL."
+readme = "README.org"
+requires-python = ">=3.13"
+dependencies = [
+    "cocotb>=2.0.1",
+    "pyelftools>=0.32",
+]
