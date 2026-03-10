@@ -1,0 +1,4 @@
+[submodule "external/riscv-arch-test"]
+	path = external/riscv-arch-test
+	url = https://github.com/riscv/riscv-arch-test
+	branch = act4

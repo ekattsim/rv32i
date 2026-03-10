@@ -1,0 +1,11 @@
+/__pycache__/
+/.pytest_cache/
+/sim_build/
+/core
+/e~core.lst
+/e~core.o
+/coretop
+/e~coretop.o
+/results.xml
+/tb/__pycache__/
+/archtest/work/

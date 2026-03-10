@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import cocotb
 from cocotb.clock import Clock
@@ -14,6 +15,14 @@ def _env_int(name: str, default: int) -> int:
     return int(raw, 0)
 
 
+def _flush_uart_line(dut, line_bytes: bytearray) -> None:
+    if not line_bytes:
+        return
+    text = line_bytes.decode("utf-8", errors="replace")
+    dut._log.info("UART: %s", text)
+    line_bytes.clear()
+
+
 @cocotb.test()
 async def run_program(dut):
     program_elf = os.getenv("PROGRAM_ELF")
@@ -24,6 +33,7 @@ async def run_program(dut):
     tohost_addr = _env_int("TOHOST_ADDR", 0x10000000)
     uart_tx_addr = _env_int("UART_TX_ADDR", 0x10000004)
     max_cycles = _env_int("MAX_CYCLES", 200000)
+    uart_log_path = os.getenv("UART_LOG_PATH")
 
     mem = MemoryModel(
         mem_size=mem_size,
@@ -44,6 +54,8 @@ async def run_program(dut):
     dut.reset.value = 0
 
     exit_code = None
+    uart_line = bytearray()
+    uart_bytes = bytearray()
 
     for cycle in range(1, max_cycles + 1):
         await ReadWrite()
@@ -72,12 +84,31 @@ async def run_program(dut):
                 byte_en=int(dut.byteEn.value),
             )
             if event.uart_byte is not None:
-                dut._log.info("UART: %s", chr(event.uart_byte))
+                uart_byte = event.uart_byte & 0xFF
+                uart_bytes.append(uart_byte)
+                if uart_byte == 0x0A:
+                    _flush_uart_line(dut, uart_line)
+                elif uart_byte != 0x0D:
+                    uart_line.append(uart_byte)
             if event.tohost_code is not None:
                 exit_code = event.tohost_code
                 break
 
-    if exit_code is None:
-        raise AssertionError(f"Timeout: no tohost write within {max_cycles} cycles")
+    _flush_uart_line(dut, uart_line)
+    uart_text = uart_bytes.decode("utf-8", errors="replace")
+    if uart_log_path:
+        path = Path(uart_log_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(uart_text, encoding="utf-8")
 
-    assert exit_code == 0, f"Program failed with code {exit_code}"
+    if exit_code is None:
+        msg = f"Timeout: no tohost write within {max_cycles} cycles"
+        if uart_text:
+            msg += f"\nUART transcript:\n{uart_text}"
+        raise AssertionError(msg)
+
+    if exit_code != 0:
+        msg = f"Program failed with code {exit_code}"
+        if uart_text:
+            msg += f"\nUART transcript:\n{uart_text}"
+        raise AssertionError(msg)

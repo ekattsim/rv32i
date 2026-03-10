@@ -71,6 +71,15 @@ uv run --python 3.13 --with cocotb --with pyelftools make sim PROG=path/to/progr
     
 The program can also produce console output by writing bytes to ~UART_TX_ADDR~ (default ~0x10000004~).
 
+The cocotb testbench can also persist the full UART transcript if ~UART_LOG_PATH~ is set in the environment before invoking the simulator. This is consumed by [[file:tb/test_core.py]] directly, not via a ~make~ variable.
+
+Example:
+
+#+begin_src sh
+uv run --python 3.13 --with cocotb --with pyelftools \
+  env UART_LOG_PATH=/tmp/program.uart.log make sim
+#+end_src
+
 *** Runtime Internals (what runs during ~make sim~)
 
 1. Build program ELF with ~riscv64-unknown-elf-gcc~ using:
@@ -78,7 +87,7 @@ The program can also produce console output by writing bytes to ~UART_TX_ADDR~ (
    - linker script: [[file:sw/linker.ld]]
 2. Launch GHDL on [[file:hw/Core.vhd]] (top-level ~core~).
 3. Cocotb ([[file:tb/test_core.py]]) loads ELF segments into the memory model ([[file:tb/memory_model.py]]).
-4. Simulation ends on tohost write or timeout.
+4. Simulation runs until a tohost write or timeout.
 
 *** Configuration Variables
 
@@ -104,5 +113,60 @@ uv run --python 3.13 --with cocotb --with pyelftools \
 #+end_src
 
 * RISC-V Architectural Certification Tests
+
+This repository uses the upstream ACT4 flow from [[https://github.com/riscv/riscv-arch-test][riscv-arch-test]] to verify the RV32I core implementation. The bundled ACT configuration under ~archtest/config/rv32i-core~ describes this design's execution environment and is used to generate self-checking architectural tests for the core.
+
+The verification flow has two steps:
+
+1. ACT4 generates self-checking ELFs for this DUT configuration.
+2. The repo runs each generated ELF on the cocotb/GHDL simulation flow from before and records a summary of pass/fail results.
+
+** Prerequisites
+
+In addition to the base simulation flow:
+
+- ~sail_riscv_sim~ ([[https://github.com/riscv/sail-riscv/releases/tag/0.10][0.10]] release)
+- ~podman~ on ~PATH~
+- ~riscv64-unknown-elf-objdump~ on ~PATH~
+
+Also initialize the ~riscv-arch-test~ submodule.
+
+#+begin_src sh
+git submodule update --init --recursive
+#+end_src
+
+** Verification
+
+Generate the ACT4 ELFs for this core:
+
+#+begin_src sh
+make archtest-gen
+#+end_src
+
+This invokes ACT4 with the repo's bundled DUT configuration and writes the generated ELFs under ~archtest/work/rv32i-core/elfs~.
+
+Run those ELFs on the simulated core:
+
+#+begin_src sh
+make archtest-run
+#+end_src
+
+This runs every generated ELF through the cocotb/GHDL DUT flow and writes a summary report to ~archtest/work/reports/test_summary.json~. The runner also saves per-test stdout, stderr, and UART logs under ~archtest/work/reports/logs/~.
+
+You can also run the full verification flow end to end:
+
+#+begin_src sh
+make archtest
+#+end_src
+
+** Interpreting Results
+
+A successful run means the generated ACT subset passed on this RV32I core under the repository's simulation flow. The summary JSON records the total number of executed tests, how many passed, and the log paths for each test case.
+
+If a run fails:
+
+- inspect ~archtest/work/reports/test_summary.json~ for the failing test entry
+- inspect the corresponding files under ~archtest/work/reports/logs/~
+- use the saved UART transcript to correlate the ACT failure with the DUT behavior seen by [[file:tb/test_core.py]]
 
 * Dhrystone Benchmark

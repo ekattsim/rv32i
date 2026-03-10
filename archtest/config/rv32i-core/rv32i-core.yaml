@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=../../../../external/riscv-unified-db/spec/schemas/config_schema.json
+
+---
+$schema: config_schema.json#
+kind: architecture configuration
+type: fully configured
+name: rv32i-core
+description: Minimal machine-mode RV32I core for ACT4 bring-up
+implemented_extensions:
+  - { name: I, version: "= 2.1" }
+  - { name: Sm, version: "= 1.12.0" }
+
+params:
+  # Base machine configuration
+  MXLEN: 32
+  PHYS_ADDR_WIDTH: 32
+  M_MODE_ENDIANNESS: little
+  PRECISE_SYNCHRONOUS_EXCEPTIONS: true
+
+  # Trap behavior
+  TRAP_ON_ECALL_FROM_M: false
+  TRAP_ON_EBREAK: false
+  TRAP_ON_UNIMPLEMENTED_INSTRUCTION: true
+  TRAP_ON_RESERVED_INSTRUCTION: true
+  TRAP_ON_UNIMPLEMENTED_CSR: false
+  TRAP_ON_ILLEGAL_WLRL: false
+
+  # mtval is not implemented
+  REPORT_VA_IN_MTVAL_ON_BREAKPOINT: false
+  REPORT_VA_IN_MTVAL_ON_LOAD_MISALIGNED: false
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_MISALIGNED: false
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_MISALIGNED: false
+  REPORT_VA_IN_MTVAL_ON_LOAD_ACCESS_FAULT: false
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_ACCESS_FAULT: false
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_ACCESS_FAULT: false
+  REPORT_ENCODING_IN_MTVAL_ON_ILLEGAL_INSTRUCTION: false
+  MTVAL_WIDTH: 0
+
+  # Misaligned halfword/word accesses trap instead of completing
+  MISALIGNED_LDST: false
+  MISALIGNED_LDST_EXCEPTION_PRIORITY: high
+
+  # Only mtvec/mepc/mcause/cycle are implemented; misa is not
+  MISA_CSR_IMPLEMENTED: false
+  MARCHID_IMPLEMENTED: false
+  MIMPID_IMPLEMENTED: false
+  VENDOR_ID_BANK: 0
+  VENDOR_ID_OFFSET: 0
+
+  # mtvec is writable, but only direct mode is intentionally modeled here
+  MTVEC_ACCESS: rw
+  MTVEC_MODES: [0]
+  MTVEC_BASE_ALIGNMENT_DIRECT: 4
+  MTVEC_ILLEGAL_WRITE_BEHAVIOR: custom
+
+  # No config pointer CSR support is modeled
+  CONFIG_PTR_ADDRESS: 0x0
+  PMA_GRANULARITY: 2
+  COUNTINHIBIT_EN:
+    [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]

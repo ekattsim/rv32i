@@ -35,7 +35,15 @@ COMPILE_ARGS += --std=08
 
 export PYTHONPATH := $(abspath tb)
 
-.PHONY: all sim clean
+ARCHTEST_DIR := external/riscv-arch-test
+ARCHTEST_CONFIG := $(abspath archtest/config/rv32i-core/test_config.yaml)
+ARCHTEST_WORKDIR := $(abspath archtest/work)
+ARCHTEST_REPORT := $(ARCHTEST_WORKDIR)/reports/test_summary.json
+
+ARCHTEST_ELF_ROOT := $(ARCHTEST_WORKDIR)/rv32i-core/elfs
+ARCHTEST_JOBS := $(shell nproc)
+
+.PHONY: all sim sim-elf archtest-gen archtest-run archtest clean
 
 all: sim
 
@@ -46,7 +54,11 @@ $(ELF): sw/crt0.S sw/linker.ld $(PROG) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) sw/crt0.S $(PROG) -o $(ELF)
 
 sim: $(ELF)
-	PROGRAM_ELF=$(abspath $(ELF)) \
+	$(MAKE) sim-elf PROGRAM_ELF=$(abspath $(ELF))
+
+sim-elf:
+	@if [ -z "$(PROGRAM_ELF)" ]; then echo "PROGRAM_ELF is required"; exit 2; fi
+	PROGRAM_ELF=$(PROGRAM_ELF) \
 	MEM_SIZE=$(MEM_SIZE) \
 	TOHOST_ADDR=$(TOHOST_ADDR) \
 	UART_TX_ADDR=$(UART_TX_ADDR) \
@@ -60,6 +72,18 @@ sim: $(ELF)
 		COMPILE_ARGS='$(COMPILE_ARGS)' \
 		SIM_ARGS='$(SIM_ARGS)'
 
+archtest-gen:
+	CONFIG_FILES=$(ARCHTEST_CONFIG) WORKDIR=$(ARCHTEST_WORKDIR) \
+	$(MAKE) -C $(ARCHTEST_DIR) --jobs $(ARCHTEST_JOBS)
+
+archtest-run:
+	uv run scripts/run_archtests.py \
+		--elf-root $(ARCHTEST_ELF_ROOT) \
+		--max-cycles $(MAX_CYCLES) \
+		--report $(ARCHTEST_REPORT)
+
+archtest: archtest-gen archtest-run
+
 clean:
 	rm -rf $(BUILD_DIR) sim_build __pycache__ tb/__pycache__ .pytest_cache \
-		results.xml core e~core.lst e~core.o coretop e~coretop.o
+		results.xml core e~core.lst e~core.o coretop e~coretop.o $(ARCHTEST_WORKDIR)
