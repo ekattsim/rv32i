@@ -19,7 +19,7 @@ class MemoryModel:
         tohost_addr: int,
         uart_tx_addr: int,
     ) -> None:
-        self.mem_size = mem_size
+        self.initial_mem_size = mem_size
         self.tohost_addr = tohost_addr
         self.uart_tx_addr = uart_tx_addr
         self.mem = bytearray(mem_size)
@@ -82,18 +82,23 @@ class MemoryModel:
         return 0
 
     def _write_blob(self, addr: int, data: bytes) -> None:
+        self._ensure_capacity(addr + len(data))
         for i, b in enumerate(data):
             self._write_byte(addr + i, b)
 
-    def _in_mem(self, addr: int) -> bool:
-        return addr < self.mem_size
+    def _ensure_capacity(self, size: int) -> None:
+        if size <= len(self.mem):
+            return
+        self.mem.extend(b"\x00" * (size - len(self.mem)))
 
     def _read_byte(self, addr: int) -> int:
-        if not self._in_mem(addr):
+        if addr < 0 or addr >= len(self.mem):
             return 0
         return self.mem[addr]
 
     def _write_byte(self, addr: int, value: int) -> None:
-        if not self._in_mem(addr):
+        if addr < 0:
             return
+        # ACT-generated tests may touch addresses beyond the initial ELF image.
+        self._ensure_capacity(addr + 1)
         self.mem[addr] = value & 0xFF
