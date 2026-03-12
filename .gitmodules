@@ -2,3 +2,6 @@
 	path = external/riscv-arch-test
 	url = https://github.com/riscv/riscv-arch-test
 	branch = act4
+[submodule "external/benchmark-dhrystone"]
+	path = external/benchmark-dhrystone
+	url = https://github.com/sifive/benchmark-dhrystone.git
