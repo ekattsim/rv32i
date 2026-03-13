@@ -171,11 +171,11 @@ If a run fails:
 
 * Dhrystone Benchmark
 
-This repository uses SiFive's [[https://github.com/sifive/benchmark-dhrystone][Dhrystone Benchmark]] to measure the performance of the RV32I core. The benchmark sources are included as a git submodule under ~external/benchmark-dhrystone~ and are built without modifying upstream code. This repo only supplies the execution environment around them: startup, linking, a minimal freestanding support layer under ~sw/dhrystone~, and a timing shim that reports cycle counts for the measured benchmark region.
+This repository uses SiFive's [[https://github.com/sifive/benchmark-dhrystone][Dhrystone Benchmark]] to measure the CPI performance of the RV32I core. The benchmark sources are included as a git submodule under ~external/benchmark-dhrystone~ and are built without modifying upstream code. The runtime support layer is under ~sw/dhrystone~, which includes a timing shim that reports cycle counts using the core's ~rdcycle~ counter.
 
-The reported performance number for this core is *1.023 DMIPS/MHz*, derived from the benchmark's cycles per iteration.
+The reported performance number for this core at the ~-O2~ optimization level is *1.023 DMIPS/MHz*. This is derived from the benchmark's cycles per iteration like this:
 
-$$\frac{\text{DMIPS}}{\text{MHz}}= \frac{10^{6}}{1757\cdot \left( \text{cycles per iteration} \right)}$$
+$$\frac{\text{DMIPS}}{\text{MHz}}= \frac{10^6}{1757\cdot \left( \text{cycles per iteration} \right)}$$
 
 ** Reproducing The Benchmark
 
@@ -198,5 +198,3 @@ This flow:
 3. Saves the UART transcript to ~build/dhrystone.uart.log~.
 4. Extracts the total measured benchmark cycles from the UART transcript.
 5. Reports cycles per iteration and ~DMIPS/MHz~.
-
-The benchmark is timed with the core's ~rdcycle~ counter. The repo-local timing shim emits the exact measured cycle count for the benchmark loop, and the reporting script converts that into the user-facing performance metrics.
