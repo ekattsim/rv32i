@@ -23,6 +23,13 @@ This repository contains a "Bare metal" RISC-V execution environment implementat
   - Load address misaligned
   - Store address misaligned
 
+** Table of Contents
+
+- [[#design-and-implementation][Design and Implementation]]
+- [[#interface-and-usage][Interface and Usage]]
+- [[#risc-v-architectural-certification-tests][RISC-V Architectural Certification Tests]]
+- [[#dhrystone-benchmark][Dhrystone Benchmark]]
+
 * Design and Implementation
 
 This diagram is the canvas upon which the datapath design evolved. Its minimal nature encodes the essentials of the design while keeping it easy to iterate on. The tradeoff is that it does not serve as a strict implementation specification. Instead, it conveys architectural intent and intuition, leaving lower level details upto the implementation.
