@@ -26,17 +26,66 @@ This repository contains a "Bare metal" RISC-V execution environment implementat
 ** Table of Contents
 
 - [[#design-and-implementation][Design and Implementation]]
-- [[#interface-and-usage][Interface and Usage]]
+- [[#building-and-running-programs][Building and Running Programs]]
 - [[#risc-v-architectural-certification-tests][RISC-V Architectural Certification Tests]]
 - [[#dhrystone-benchmark][Dhrystone Benchmark]]
 
 * Design and Implementation
 
-This diagram is the canvas upon which the datapath design evolved. Its minimal nature encodes the essentials of the design while keeping it easy to iterate on. The tradeoff is that it does not serve as a strict implementation specification. Instead, it conveys architectural intent and intuition, leaving lower level details upto the implementation.
+[[file:hw/Core.vhd][Core.vhd]] implements a standard five-stage in-order pipeline: fetch, decode, execute, memory, and writeback. The design stays close to the textbook RV32I structure while handling the practical issues that arise in a real implementation.
 
-[[file:block_diagram.png]]
+** Architecture Overview
 
-* Interface and Usage
+The datapath diagram below encodes the essentials of the design while keeping it easy to iterate on. The tradeoff is that it does not serve as a strict implementation specification.
+
+[[file:resources/rv32i-datapath.png]]
+
+One deliberate departure from the textbook pipeline is that control transfers are resolved in decode rather than execute. Conditional branches, JAL, and JALR are all decided in the ID stage, which reduces the taken-branch penalty at the cost of decode-stage forwarding and more careful stall logic.
+
+** Hazards and Forwarding
+
+The core uses bypassing at two points in the pipeline. Execute-stage forwarding selects operands from EX/MEM or MEM/WB before they enter the ALU, avoiding stalls for back-to-back arithmetic dependencies. Decode-stage forwarding feeds branch, JALR, and CSR consumers from EX/MEM when the needed value was just produced by the ALU.
+
+Not every dependency can be bypassed. The hazard unit stalls fetch and decode when:
+
+- Load-Use: a load result is consumed by the immediately following instruction
+- Decode-Consumer: decode is trying to resolve a branch, ~JALR~, or CSR access before the required producer has made its value available
+  
+On a stall, the PC and IF/ID registers are held while ID/EX is turned into a bubble.
+
+** Memory Interface
+
+The core assumes tightly-coupled memory (TCM) and exposes a simple interface:
+
+- ~memEn~ marks a load or store in the MEM stage
+- ~writeEn~ distinguishes stores from loads
+- ~byteEn~ selects byte, halfword, or word accesses
+- ~dataAddr~ is the effective address from the ALU
+- ~dataWrite~ carries the forwarded store data
+  
+Loads are sign-extended or zero-extended in the MEM stage based on the decoded load variant. This interface matches the cocotb memory model used by the repository and keeps the core decoupled from any particular bus fabric.
+
+** CSR and Exception Handling
+
+The implemented CSR subset is small:
+
+- ~mtvec~
+- ~mepc~
+- ~mcause~
+- ~cycle~
+  
+CSR reads are asynchronous in decode, while CSR writes commit on the /rising edge/ unlike the register file. The ~cycle~ CSR increments every cycle. ~CSRRW~ and ~CSRRS~ are implemented, which is enough to support the documented ~Zicsr/Zicntr~ subset, including ~RDCYCLE~.
+
+Exception handling is minimal. The core detects:
+
+- illegal instructions in decode
+- instruction-address misalignment on taken branches and jumps
+- load-address misalignment in execute
+- store-address misalignment in execute
+  
+On an exception, the core captures the faulting PC into ~mepc~, writes the cause code into ~mcause~, flushes the later instructions in the pipeline, and redirects the next fetch to ~mtvec~.
+
+* Building and Running Programs
 
 The repository includes a standard bare-metal software + cocotb simulation flow for running arbitrary RV32I programs.
 
@@ -46,15 +95,9 @@ The repository includes a standard bare-metal software + cocotb simulation flow 
 - GHDL
 - Python dependencies via ~uv~
 
-Install Python dependencies:
-
-#+begin_src sh
-uv run --python 3.13 --with cocotb --with pyelftools python -c "import cocotb, elftools"
-#+end_src
-
 ** Quick Start
 
-Run the bundled [[file:sw/examples/test.c][example program:]]
+Run the [[file:sw/examples/test.c][example program:]]
 
 #+begin_src sh
 uv run --python 3.13 --with cocotb --with pyelftools make sim
@@ -92,7 +135,7 @@ uv run --python 3.13 --with cocotb --with pyelftools \
 1. Build program ELF with ~riscv64-unknown-elf-gcc~ using:
    - startup: [[file:sw/crt0.S]]
    - linker script: [[file:sw/linker.ld]]
-2. Launch GHDL on [[file:hw/Core.vhd]] (top-level ~core~).
+2. Launch GHDL on [[file:hw/Core.vhd]].
 3. Cocotb ([[file:tb/test_core.py]]) loads ELF segments into the memory model ([[file:tb/memory_model.py]]).
 4. Simulation runs until a tohost write or timeout.
 
@@ -121,20 +164,20 @@ uv run --python 3.13 --with cocotb --with pyelftools \
 
 * RISC-V Architectural Certification Tests
 
-This repository uses the upstream ACT4 flow from [[https://github.com/riscv/riscv-arch-test][riscv-arch-test]] to verify the RV32I core implementation. The bundled ACT configuration under ~archtest/config/rv32i-core~ describes this design's execution environment and is used to generate self-checking architectural tests for the core.
+This repository uses the upstream ACT4 flow from [[https://github.com/riscv/riscv-arch-test][riscv-arch-test]] to verify the correctness of the RV32I implementation. The bundled ACT configuration under ~archtest/config/rv32i-core~ describes this design's execution environment and is used to generate self-checking architectural tests for the core.
 
 The verification flow has two steps:
 
 1. ACT4 generates self-checking ELFs for this DUT configuration.
-2. The repo runs each generated ELF on the cocotb/GHDL simulation flow from before and records a summary of pass/fail results.
+2. The repo runs each generated ELF on the cocotb/GHDL simulation flow and records a summary of pass/fail results.
 
 ** Prerequisites
 
-In addition to the base simulation flow:
+In addition to the base simulation flow, we need these on the ~PATH~:
 
 - ~sail_riscv_sim~ ([[https://github.com/riscv/sail-riscv/releases/tag/0.10][0.10]] release)
-- ~podman~ on ~PATH~
-- ~riscv64-unknown-elf-objdump~ on ~PATH~
+- ~podman~
+- ~riscv64-unknown-elf-objdump~
 
 Also initialize the ~riscv-arch-test~ submodule.
 
@@ -168,9 +211,9 @@ make archtest
 
 ** Interpreting Results
 
-A successful run means the generated ACT subset passed on this RV32I core under the repository's simulation flow. The summary JSON records the total number of executed tests, how many passed, and the log paths for each test case.
+A successful run means the generated ACT subset passed on this RV32I core. The summary JSON records the total number of executed tests, how many passed, and the log paths for each test case.
 
-If a run fails:
+If you made any changes and a run fails:
 
 - inspect ~archtest/work/reports/test_summary.json~ for the failing test entry
 - inspect the corresponding files under ~archtest/work/reports/logs/~
